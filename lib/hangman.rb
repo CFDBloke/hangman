@@ -1,6 +1,7 @@
 # frozen_string_literal: false
 
 require 'English'
+require 'yaml'
 
 # An addon to the String class to change the colour of the text
 class String
@@ -13,11 +14,74 @@ class String
   end
 end
 
-def choose_game_option(game)
+def choose_game_option
   puts "Please select an option by entering an appropriate number:\n"\
   "1 - Start a new game\n2 - Load an existing game\n"
 
-  game.start(gets.chomp)
+  start(gets.chomp)
+end
+
+def start(choice)
+  case choice
+  when '1'
+    Game.new.new_game
+  when '2'
+    GameLoader.new
+  else
+    puts "Sorry, I didn\'t quite catch that..."
+    choose_game_option(self)
+  end
+end
+
+# Class to handle the loading of a game from a save file
+class GameLoader
+  def initialize
+    file_number = 1
+    files_list = {}
+    Dir.glob('./hangman_saves/*.yml') do |file|
+      files_list[file_number] = file.sub('./hangman_saves/', '').sub('.yml', '')
+      file_number += 1
+    end
+
+    check_for_save_files(files_list)
+  end
+
+  private
+
+  def check_for_save_files(files_list)
+    if files_list.length.zero?
+      puts 'No save files found, starting new game'
+      Game.new.new_game
+    else
+      load_game(files_list)
+    end
+  end
+
+  def load_game(files_list)
+    file_to_open = get_file_to_open(files_list)
+
+    begin
+      open_file(file_to_open).continue_game
+    rescue Errno::ENOENT
+      puts 'File not found, please try again!'
+      load_game(files_list)
+    rescue NoMethodError
+      puts 'File not recognized, please try again!'
+      load_game(files_list)
+    end
+  end
+
+  def get_file_to_open(files_list)
+    puts "\nPlease choose which file to open by entering an appropriate number:"
+    files_list.each { |key, file| puts "#{key} - #{file}" }
+    files_list[gets.chomp.to_i]
+  end
+
+  def open_file(file_to_open)
+    file = File.open("./hangman_saves/#{file_to_open}.yml")
+    yaml_string = file.read
+    YAML.load(yaml_string)
+  end
 end
 
 # A letter object that also stores the guess state of the letter
@@ -103,7 +167,7 @@ module SecretWordMaker
       words.rewind
       word_acceptable = secret_word.strip.length > 5 && secret_word.strip.length < 12 ? true : false
     end
-    p secret_word
+
     secret_word
   end
 
@@ -274,20 +338,6 @@ class Game
     @hangman = Man.new
   end
 
-  def start(choice)
-    case choice
-    when '1'
-      new_game
-    when '2'
-      load_game
-    else
-      puts "Sorry, I didn\'t quite catch that..."
-      choose_game_option(self)
-    end
-  end
-
-  private
-
   def new_game
     define_secret_word
     @available_letters = [*('a'..'z')].map { |letter| LetterObject.new(letter) }
@@ -295,16 +345,18 @@ class Game
     puts "The secret word has been defined. You have 9 attempts to correctly guess the word.\n"\
     "Good Luck!\n\n"
 
-    play_round until @man_hung || @solved
+    continue_game
+  end
+
+  def continue_game
+    play_round until @man_hung || @solved || @close
 
     draw_gameboard(@secret_word, @no_of_wrong_guesses, @hangman)
 
     end_game
   end
 
-  def load_game
-    puts 'I will load a game at some point!'
-  end
+  private
 
   def play_round
     draw_gameboard(@secret_word, @no_of_wrong_guesses, @hangman)
@@ -328,7 +380,21 @@ class Game
   end
 
   def save_game
-    puts 'I will save the game at some point!'
+    serialized_game = YAML.dump(self)
+
+    save_dir = 'hangman_saves'
+
+    Dir.mkdir(save_dir) unless Dir.exist?(save_dir)
+
+    puts 'Please enter a save file name:'
+    filename = "#{gets.chomp}.yml"
+
+    save_file = File.open("./#{save_dir}/#{filename}", 'w')
+    save_file.puts serialized_game
+    save_file.close
+
+    puts "Game saved as #{filename}. Would you like to exit the game? (enter 'y' for yes, anything else for no)"
+    @close = true if gets.chomp.downcase == 'y'
   end
 
   def update_available_letters(guess_is, letter_choice)
@@ -349,15 +415,16 @@ class Game
       puts "Sorry, you\'ve been hung!! The secret word was \'#{@secret_word}\'"
     elsif @solved
       puts 'Congratulations, you found the word!!'
+    else
+      puts 'Ok, we\'ll finish this later'
     end
   end
 end
 
-game = Game.new
-
 puts "          *** Welcome to Hangman ***          \n"\
 " \n"
-choose_game_option(game)
+choose_game_option
+
 # |                              |
 # |            ______            |
 # |            | /  |            |
